@@ -20,7 +20,7 @@ Bu loyiha Docker va CI/CD ni amaliy o'rganish uchun yaratilgan.
 ### 1. Klonlash
 
 ```bash
-git clone https://github.com/sizning/todoapi.git
+git clone https://github.com/DiorDevv/TodoAPI.git
 cd todoapi
 ```
 
