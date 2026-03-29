@@ -1,0 +1,99 @@
+# =============================================================
+# DOCKER COMPOSE - Barcha servicelarni birga boshqaradi
+# =============================================================
+# Ishlatish:
+#   docker compose up -d          # Ishga tushirish
+#   docker compose logs -f web    # Loglarni kuzatish
+#   docker compose exec web bash  # Container ichiga kirish
+#   docker compose down           # To'xtatish
+#   docker compose down -v        # To'xtatish + volume o'chirish
+# =============================================================
+
+version: "3.9"
+
+services:
+
+  # ---- PostgreSQL ----
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-todoapp}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      # Named volume - container o'chsa ham ma'lumot saqlanadi
+      - postgres_data:/var/lib/postgresql/data
+    # Healthcheck - db tayyor bo'lganda web ishga tushadi
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-todoapp}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    # Web servicega expose QILINMAYDI (ichki tarmoqda)
+
+  # ---- Redis ----
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  # ---- Django (asosiy app) ----
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production  # Multi-stage dan production stage
+    restart: unless-stopped
+    environment:
+      SECRET_KEY: ${SECRET_KEY:-changeme-in-production}
+      DEBUG: ${DEBUG:-False}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost 127.0.0.1}
+      POSTGRES_DB: ${POSTGRES_DB:-todoapp}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_HOST: db  # docker-compose service nomi
+      POSTGRES_PORT: 5432
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      # Static va media fayllar nginx uchun
+      - static_files:/app/staticfiles
+      - media_files:/app/media
+    depends_on:
+      db:
+        condition: service_healthy  # DB tayyor bo'lgandan keyin
+      redis:
+        condition: service_healthy
+    # Migrations avtomatik va keyin server start
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             gunicorn --bind 0.0.0.0:8000 --workers 3 app.core.wsgi:application"
+    # Web to'g'ridan-to'g'ri expose qilinmaydi, nginx orqali
+
+  # ---- Nginx (Reverse Proxy) ----
+  nginx:
+    image: nginx:1.25-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      # HTTPS uchun: - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - static_files:/app/staticfiles:ro  # web service bilan bir xil volume
+      - media_files:/app/media:ro
+    depends_on:
+      - web
+
+# ---- Named Volumes ----
+# docker volume ls bilan ko'rish mumkin
+volumes:
+  postgres_data:
+  redis_data:
+  static_files:
+  media_files:
